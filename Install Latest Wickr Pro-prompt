@@ -1,0 +1,154 @@
+#!/bin/bash
+
+# Downloads the latest Wickr Pro from wickr.com and installs it, then removes the installer from the tmp directory
+
+ProcessName=WickrPro
+WickrProURL=$(curl -s https://pro-download.wickr.com/api/download/pro/download/mac | perl -p -e "s/\{\"link\"\:\"([^\"]+).*/\\1/")
+
+if [[ -f /usr/local/wickr/wickrversion.txt ]]; then
+OldWickrProURL=$(cat /usr/local/wickr/wickrversion.txt)
+else
+mkdir /usr/local/wickr/
+fi
+LoggedInUser=$( stat -f%Su /dev/console )
+LoggedInUID=$(stat -f %u /dev/console)
+
+function UpdateWickrPro () {
+chmod 777 /usr/local/wickr/wickrversion.txt
+echo $WickrProURL > /usr/local/wickr/wickrversion.txt
+curl -L $WickrProURL -o /tmp/WickrProLatest.app.zip
+unzip /tmp/WickrProLatest.app.zip -d /tmp/WickrProLatest/
+
+# Remove 
+for d in /Applications/WickrPro*
+do
+rm -Rf /Applications/WickrPro*
+done
+
+for d in /Users/$LoggedInUser/Downloads/WickrPro*
+do
+rm -Rf /Users/$LoggedInUser/Downloads/WickrPro*
+done
+
+for f in /Users/$LoggedInUser/Downloads/WickrPro*.*
+do
+    if [  -f $f ]
+    then
+        rm "$f"
+    fi
+done
+
+# Install Wickr Pro to /Applications folder
+cp -R /tmp/WickrProLatest/WickrPro.app /Applications
+
+# Clean Up
+
+rm -f /tmp/WickrProLatest.app.zip
+rm -Rf /tmp/WickrProLatest/
+}
+
+if [[ $WickrProURL == $OldWickrProURL ]]; then
+echo "Wickr Pro already up to date"
+exit 0
+else
+
+
+if [[ $LoggedInUser = "root" ]]; then
+echo "No user logged in - running unattended update"
+UpdateWickrPro
+exit 0
+fi
+
+if [[ ! -d /Applications/WickrPro.app ]]; then
+echo "WickrPro not installed - running unattended update"
+UpdateWickrPro
+exit 0
+fi
+
+application=$( echo "$ProcessName".app | sed 's/./&]/1' | sed -e 's/^/[/' )
+#echo "converted string = $application"
+number=$(ps ax | grep -c "$application")
+
+if [ $number -gt 0 ]; then
+echo "$ProcessName is open - notify user"
+
+#Notify
+cp /Applications/WickrPro.app/Contents/Resources/WickrPro.icns /usr/local/wickr
+
+sleep 3
+
+icon="/usr/local/wickr/WickrPro.icns"        
+title="IT Notification - Update" 
+jamfHelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
+description="$ProcessName needs to be quit so it  
+can be updated, please click QUIT to  
+close the application and update now  
+or choose LATER to update later"
+
+button1="LATER"
+button2="UPDATE"
+
+#resolved pasteboard error - https://www.jamf.com/jamf-nation/discussions/17245/running-management-action-fails-on-10-10-and-10-11
+userChoice=$(/bin/launchctl asuser $(id -u $LoggedInUser) sudo -u $(ls -l /dev/console | awk '{print $3}') "$jamfHelper" -windowPosition ul -windowType hud -description "$description" -title "$title" -button1 "$button1" -button2 "$button2" -icon "$icon")
+
+    if [ "$userChoice" == "2" ]; then
+
+echo "User clicked UPDATE - hoorah"
+rm /usr/local/wickr/WickrPro.icns
+
+
+#quit application
+#---- create separate script to run as user, cannot get asuser working with a $ parameter
+#approach from - https://www.jamf.com/jamf-nation/discussions/24584/need-help-forcing-script-to-run-commands-under-current-logged-on-user
+
+cat << EOF > /private/tmp/quit_application.sh
+#!/bin/bash
+
+echo "Closing $ProcessName"
+/usr/bin/osascript -e 'quit app "$ProcessName"'
+
+EOF
+
+if [ -e /private/tmp/quit_application.sh ]; then
+    /bin/chmod +x /private/tmp/quit_application.sh
+    /bin/launchctl asuser "$LoggedInUID" sudo -iu "$LoggedInUser" "/private/tmp/quit_application.sh"
+    sleep 2
+    echo "Cleaning up..."
+    /bin/rm -f "/private/tmp/quit_application.sh"
+else
+    echo "Oops! Couldn't find the script to run. Something went wrong!"
+    exit 1
+fi
+
+
+#convert $ProcessName paramater so it can be used in trigger command, remove space and make lower case
+trigger=$( echo $ProcessName | sed 's/ //g' | tr '[:upper:]' '[:lower:]' )
+
+echo "WickrPro Closed - running update"
+UpdateWickrPro
+echo "WickrPro was closed for update - reopening WickrPro"
+open /Applications/WickrPro.app
+
+exit 0
+
+else
+
+echo "User clicked later - exit script"
+rm /usr/local/wickr/WickrPro.icns
+exit 0
+
+
+fi
+
+fi
+
+echo "$ProcessName is closed - running update"
+trigger=$( echo $ProcessName | sed 's/ //g' | tr '[:upper:]' '[:lower:]' )
+UpdateWickrPro
+
+
+
+fi
+
+
+exit 1
