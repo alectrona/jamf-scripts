@@ -13,6 +13,10 @@
 
 # Created by Alectrona
 
+# Parameters
+tempPass="$4"
+
+# Variables
 loggedInUser=$( echo "show State:/Users/ConsoleUser" | /usr/sbin/scutil | /usr/bin/awk '/Name :/ && ! /loginwindow/ { print $3 }' )
 loggedInUID=$(/usr/bin/id -u "$loggedInUser")
 title="Enable FileVault Encryption"
@@ -21,9 +25,9 @@ count="1"
 unset userPass demote
 
 # Determine if we need to use the temp password
-if [[ -n "$4" ]] && /usr/bin/dscl /Search -authonly "$loggedInUser" "$4" &>/dev/null; then
+if [[ -n "$tempPass" ]] && /usr/bin/dscl /Search -authonly "$loggedInUser" "$tempPass" &>/dev/null; then
     echo "Using $loggedInUser's temporary Mac password..."
-    userPass="$4"
+    userPass="$tempPass"
 else
     echo "Temporary password is empty or not correct; skipping."
 fi
@@ -55,7 +59,7 @@ function enable_filevault_or_issue_new_recovery_key () {
     /usr/bin/defaults write "$plist" Username -string "$loggedInUser"
     /usr/bin/defaults write "$plist" Password -string "$userPass"
     
-    if fdesetup status | /usr/bin/grep "Off" > /dev/null ; then
+    if /usr/bin/fdesetup status | /usr/bin/grep "Off" > /dev/null ; then
         echo "Enabling FileVault..."
         /usr/bin/fdesetup enable -inputplist < "$plist"
     else
